@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Vallen Compressor Verification Timer</title>
+<style>
+  body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    text-align: center;
+    background-color: white;
+    transition: background-color 0.5s ease;
+  }
+  h1 { font-size:36px; margin-top:20px; margin-bottom:10px; }
+  #clock { font-size:80px; margin-top:10px; }
+  #date { font-size:28px; margin-bottom:20px; }
+
+  #controlsRow { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; align-items:flex-end; margin-bottom:10px; }
+  #controlsRow div { display:flex; flex-direction:column; align-items:center; }
+  input, button { padding:10px; margin:5px; font-size:16px; }
+  #ackBtn { display:none; padding:12px 25px; font-size:18px; margin-bottom:20px; }
+  #timerListContainer { display:none; margin-top:20px; }
+  #timerList { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px; list-style:none; padding:0; }
+  #timerList li button { margin-left:5px; }
+  #status { margin-bottom:10px; font-size:18px; color:#333; }
+  footer { text-align:center; font-size:12px; margin-top:40px; color:#555; }
+</style>
+</head>
+<body>
+
+<h1>Vallen Compressor Verification Timer</h1>
+<div id="clock"></div>
+<div id="date"></div>
+
+<div id="controlsRow">
+  <div>
+    <label for="startTime">Start Time</label>
+    <input type="datetime-local" id="startTime" style="width:180px;">
+  </div>
+  <div>
+    <label for="endTime">End Time</label>
+    <input type="datetime-local" id="endTime" style="width:180px;">
+  </div>
+  <div>
+    <label for="interval">Interval (min)</label>
+    <input type="number" id="interval" placeholder="Minutes" min="1" style="width:80px;">
+  </div>
+  <button onclick="startTimers()" style="height:40px;">Start</button>
+  <button onclick="resetTimers()" style="height:40px;">Reset</button>
+</div>
+
+<div id="status"></div>
+
+<button id="ackBtn" onclick="acknowledge()">Acknowledge</button>
+
+<button id="toggleTimersBtn" onclick="toggleActiveTimers()" style="margin-top:20px; display:none;">See Active Timers</button>
+
+<div id="timerListContainer" style="display:none;">
+  <h3 id="timerListTitle">Active Timers</h3>
+  <ul id="timerList"></ul>
+</div>
+
+<audio id="beepSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+
+<script>
+let timers = [];
+let currentIndex = 0;
+let warningTimeout = null;
+let alertTimeout = null;
+
+// Clock update
+function updateClock() {
+  const now = new Date();
+  let hours = now.getHours();
+  const minutes = now.getMinutes().toString().padStart(2,'0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12 || 12;
+  document.getElementById("clock").innerText = `${hours}:${minutes} ${ampm}`;
+  document.getElementById("date").innerText = now.toDateString();
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// Parse datetime-local input as local time
+function parseLocalDateTime(input) {
+  const [date, time] = input.split('T');
+  const [year, month, day] = date.split('-').map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+  return new Date(year, month-1, day, hour, minute);
+}
+
+// Start timers
+function startTimers() {
+  const startInput = document.getElementById("startTime").value;
+  const endInput = document.getElementById("endTime").value;
+  const interval = parseInt(document.getElementById("interval").value);
+
+  if (!startInput || !endInput || !interval) {
+    alert("Please fill all fields.");
+    return;
+  }
+
+  const start = parseLocalDateTime(startInput);
+  const end = parseLocalDateTime(endInput);
+
+  if (end <= start) {
+    alert("End time must be after start time.");
+    return;
+  }
+
+  timers = [];
+  currentIndex = 0;
+
+  let nextTime = new Date(start);
+  while (nextTime <= end) {
+    timers.push(new Date(nextTime));
+    nextTime = new Date(nextTime.getTime() + interval * 60000);
+  }
+
+  document.getElementById("status").innerText = "Timers started.";
+  document.getElementById("timerListContainer").style.display = "none";
+  document.getElementById("toggleTimersBtn").innerText = "See Active Timers";
+
+  updateTimerList();
+  runTimer();
+}
+
+// Run current timer using setTimeout
+function runTimer() {
+  if (currentIndex >= timers.length) {
+    document.getElementById("status").innerText = "All timers completed.";
+    document.body.style.backgroundColor = "white";
+    return;
+  }
+
+  const now = new Date();
+  const target = timers[currentIndex];
+  const diff = target - now;
+
+  if (warningTimeout) clearTimeout(warningTimeout);
+  if (alertTimeout) clearTimeout(alertTimeout);
+
+  if (diff > 120000) {
+    warningTimeout = setTimeout(() => {
+      document.body.style.backgroundColor = "yellow";
+    }, diff - 120000);
+  } else {
+    document.body.style.backgroundColor = "yellow";
+  }
+
+  alertTimeout = setTimeout(() => {
+    document.body.style.backgroundColor = "red";
+    document.getElementById("status").innerText = "CHECK THE COMPRESSOR AND LOG THE OBSERVED READINGS!";
+    document.getElementById("ackBtn").style.display = "inline-block";
+    playSound();
+  }, diff);
+}
+
+// Play beep sound
+function playSound() {
+  const sound = document.getElementById("beepSound");
+  sound.loop = true;
+  sound.play();
+}
+
+// Acknowledge timer
+function acknowledge() {
+  if (warningTimeout) clearTimeout(warningTimeout);
+  if (alertTimeout) clearTimeout(alertTimeout);
+
+  const sound = document.getElementById("beepSound");
+  sound.pause();
+  sound.currentTime = 0;
+
+  document.getElementById("ackBtn").style.display = "none";
+  document.body.style.backgroundColor = "white";
+  document.getElementById("status").innerText = "Previous Timer Acknowledged by User";
+
+  currentIndex++;
+  updateTimerList();
+  runTimer();
+}
+
+// Update active timer list
+function updateTimerList() {
+  const container = document.getElementById("timerListContainer");
+  const list = document.getElementById("timerList");
+  const title = document.getElementById("timerListTitle");
+  const toggleBtn = document.getElementById("toggleTimersBtn");
+  list.innerHTML = "";
+
+  let activeTimersExist = false;
+
+  timers.forEach((timer, idx) => {
+    if (idx < currentIndex) return;
+    activeTimersExist = true;
+
+    const li = document.createElement("li");
+    const hours = timer.getHours() % 12 || 12;
+    const minutes = timer.getMinutes().toString().padStart(2, "0");
+    const ampm = timer.getHours() >= 12 ? "PM" : "AM";
+    li.textContent = `${hours}:${minutes} ${ampm}`;
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "Delete";
+    delBtn.onclick = () => {
+      timers.splice(idx, 1);
+      updateTimerList();
+      if (idx === currentIndex) runTimer();
+    };
+
+    li.appendChild(delBtn);
+    list.appendChild(li);
+  });
+
+  container.style.display = "none"; // hidden by default
+  title.style.display = activeTimersExist ? "block" : "none";
+  toggleBtn.style.display = activeTimersExist ? "inline-block" : "none";
+  if (!activeTimersExist) toggleBtn.innerText = "See Active Timers";
+}
+
+// Toggle active timers visibility
+function toggleActiveTimers() {
+  const container = document.getElementById("timerListContainer");
+  const btn = document.getElementById("toggleTimersBtn");
+  if (container.style.display === "none" || container.style.display === "") {
+    container.style.display = "block";
+    btn.innerText = "Hide Active Timers";
+  } else {
+    container.style.display = "none";
+    btn.innerText = "See Active Timers";
+  }
+}
+
+// Reset everything
+function resetTimers() {
+  if (warningTimeout) clearTimeout(warningTimeout);
+  if (alertTimeout) clearTimeout(alertTimeout);
+
+  timers = [];
+  currentIndex = 0;
+
+  document.getElementById("startTime").value = "";
+  document.getElementById("endTime").value = "";
+  document.getElementById("interval").value = "";
+
+  document.getElementById("status").innerText = "";
+  document.getElementById("ackBtn").style.display = "none";
+  document.body.style.backgroundColor = "white";
+  updateTimerList();
+}
+</script>
+
+<footer>Created by MW</footer>
+
+</body>
+</html>
